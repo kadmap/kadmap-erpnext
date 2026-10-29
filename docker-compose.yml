@@ -1,0 +1,118 @@
+# KDM ERPNext — docker-compose deployment manifest
+#
+# Stored by the MKDM marketplace pipeline and served to KDMs on install.
+# Fill in .env (copy from .env.example) before running:
+#   docker-compose up -d
+
+services:
+
+  # ── ERPNext web (HTTP on port ERPNEXT_PORT) ──────────────────────────────────
+  erpnext-web:
+    image: ${ERPNEXT_IMAGE}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis-cache:
+        condition: service_started
+      redis-queue:
+        condition: service_started
+    environment:
+      FRAPPE_SITE_NAME:      ${FRAPPE_SITE_NAME:-erpnext.localhost}
+      AUTHENTIK_URL:         ${AUTHENTIK_URL}
+      OIDC_CLIENT_ID:        ${OIDC_CLIENT_ID}
+      OIDC_CLIENT_SECRET:    ${OIDC_CLIENT_SECRET}
+      OIDC_APP_SLUG:         ${OIDC_APP_SLUG:-erpnext}
+      MYSQL_ROOT_PASSWORD:   ${MYSQL_ROOT_PASSWORD}
+      FRAPPE_ADMIN_PASSWORD: ${FRAPPE_ADMIN_PASSWORD}
+      DB_HOST:               db
+      REDIS_CACHE:           redis-cache:6379
+      REDIS_QUEUE:           redis-queue:6379
+    volumes:
+      - erpnext-sites:/home/frappe/frappe-bench/sites
+      - erpnext-logs:/home/frappe/frappe-bench/logs
+    ports:
+      - "${ERPNEXT_PORT:-8080}:8000"
+    networks:
+      - erpnext-net
+
+  # ── Background job worker ────────────────────────────────────────────────────
+  erpnext-worker:
+    image: ${ERPNEXT_IMAGE}
+    restart: unless-stopped
+    entrypoint: []
+    command: ["bench", "--site", "${FRAPPE_SITE_NAME:-erpnext.localhost}", "worker", "--queue", "default,short,long"]
+    depends_on:
+      - erpnext-web
+    environment:
+      FRAPPE_SITE_NAME: ${FRAPPE_SITE_NAME:-erpnext.localhost}
+      DB_HOST:          db
+      REDIS_CACHE:      redis-cache:6379
+      REDIS_QUEUE:      redis-queue:6379
+    volumes:
+      - erpnext-sites:/home/frappe/frappe-bench/sites
+      - erpnext-logs:/home/frappe/frappe-bench/logs
+    networks:
+      - erpnext-net
+
+  # ── Scheduler (cron-style periodic tasks) ────────────────────────────────────
+  erpnext-scheduler:
+    image: ${ERPNEXT_IMAGE}
+    restart: unless-stopped
+    entrypoint: []
+    command: ["bench", "--site", "${FRAPPE_SITE_NAME:-erpnext.localhost}", "schedule"]
+    depends_on:
+      - erpnext-web
+    environment:
+      FRAPPE_SITE_NAME: ${FRAPPE_SITE_NAME:-erpnext.localhost}
+      DB_HOST:          db
+      REDIS_CACHE:      redis-cache:6379
+      REDIS_QUEUE:      redis-queue:6379
+    volumes:
+      - erpnext-sites:/home/frappe/frappe-bench/sites
+      - erpnext-logs:/home/frappe/frappe-bench/logs
+    networks:
+      - erpnext-net
+
+  # ── MariaDB ───────────────────────────────────────────────────────────────────
+  db:
+    image: mariadb:10.6
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --skip-character-set-client-handshake
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    volumes:
+      - erpnext-db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    networks:
+      - erpnext-net
+
+  # ── Redis (page / query cache) ────────────────────────────────────────────────
+  redis-cache:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks:
+      - erpnext-net
+
+  # ── Redis (background job queue) ─────────────────────────────────────────────
+  redis-queue:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks:
+      - erpnext-net
+
+volumes:
+  erpnext-sites:
+  erpnext-db:
+  erpnext-logs:
+
+networks:
+  erpnext-net:
+    driver: bridge

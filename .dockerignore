@@ -1,0 +1,52 @@
+# Git history — not needed in the image
+.git
+.github
+
+# OSS scanner tooling — only used for security analysis
+.oss-scanner
+
+# Python artifacts
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info
+.eggs
+dist
+build
+.venv
+venv
+env
+
+# Node artifacts (bench builds its own node inside the container)
+node_modules
+.npm
+
+# Test and CI files
+.pytest_cache
+.tox
+.coverage
+coverage.xml
+*.cover
+htmlcov
+
+# IDE and editor files
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Documentation (not needed at runtime)
+*.md
+docs
+
+# Local env files (secrets — never bake into the image)
+.env
+.env.*
+!.env.example

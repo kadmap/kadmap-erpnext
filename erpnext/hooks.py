@@ -98,9 +98,14 @@ page_js = {"print": "public/js/print.js"}
 
 extend_doctype_class = {"Address": "erpnext.accounts.custom.address.ERPNextAddress"}
 
-override_whitelisted_methods = {"frappe.www.contact.send_message": "erpnext.templates.utils.send_message"}
+override_whitelisted_methods = {
+	"frappe.www.contact.send_message": "erpnext.templates.utils.send_message",
+	# KDM: password reset is disabled — authentication is handled by Authentik OIDC
+	"frappe.core.doctype.user.user.reset_password": "erpnext.kdm_auth.session.block_password_reset",
+}
 
-welcome_email = "erpnext.setup.utils.welcome_email"
+# KDM: welcome emails suppressed — Authentik handles user onboarding
+# welcome_email = "erpnext.setup.utils.welcome_email"
 
 # setup wizard
 setup_wizard_requires = "assets/erpnext/js/setup_wizard.js"
@@ -123,7 +128,11 @@ get_help_messages = "erpnext.utilities.activation.get_help_messages"
 filters_config = "erpnext.startup.filters.get_filters_config"
 additional_print_settings = "erpnext.controllers.print_settings.get_print_settings"
 
-on_session_creation = "erpnext.portal.utils.create_customer_or_supplier"
+on_session_creation = [
+	"erpnext.portal.utils.create_customer_or_supplier",
+	# KDM: assign default role on first OIDC login
+	"erpnext.kdm_auth.session.on_session_creation",
+]
 
 treeviews = [
 	"Account",
@@ -426,6 +435,7 @@ doc_events = {
 		"validate": "erpnext.stock.doctype.company_restriction.company_restriction.validate_allowed_companies",
 	},
 	"User": {
+		"before_insert": "erpnext.kdm_auth.session.suppress_user_welcome_email",
 		"after_insert": "frappe.contacts.doctype.contact.contact.update_contact",
 		"validate": "erpnext.setup.doctype.employee.employee.validate_employee_role",
 		"on_update": "erpnext.portal.utils.set_default_role",
