@@ -1,12 +1,47 @@
 # KDM ERPNext — docker-compose deployment manifest
 #
 # Stored by the MKDM marketplace pipeline and served to KDMs on install.
-# Fill in .env (copy from .env.example) before running:
-#   docker-compose up -d
+#
+# KDM deployment env vars (injected by MKDM pipeline):
+#   APP_SLUG           - KDM marketplace slug (e.g. kadmap-erpnext)
+#   WORKSPACE_SLUG_SAFE - workspace slug, hyphens → underscores (e.g. main_ws)
+#   ERPNEXT_IMAGE      - fully-qualified image:tag built by MKDM CI
+#   AUTHENTIK_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET
+#   MYSQL_ROOT_PASSWORD, FRAPPE_ADMIN_PASSWORD
+#
+# Local dev: copy .env.example → .env, then `docker compose up -d`
 
 services:
 
-  # ── ERPNext web (HTTP on port ERPNEXT_PORT) ──────────────────────────────────
+  # ── KDM nginx proxy (the KDM-facing entry point) ─────────────────────────────
+  # container_name follows the KDM convention:
+  #   {app_slug}_ws_{workspace_slug_safe}_{app_slug}
+  # so the KDM nginx generic catch-all can discover and route to this container
+  # via Docker DNS on platform_net without any per-app nginx customisation.
+  #
+  # At startup, kdm-proxy-entrypoint.sh runs envsubst to bake APP_SLUG and
+  # WORKSPACE_SLUG_SAFE into the nginx config template, then starts nginx.
+  # This sidecar strips the /apps/{ws}/{slug} prefix and handles all Frappe
+  # sub_filter rewrites so the upstream KDM nginx needs no Frappe-specific code.
+  erpnext-proxy:
+    image: nginx:alpine
+    container_name: ${APP_SLUG:-erpnext}_ws_${WORKSPACE_SLUG_SAFE:-0}_${APP_SLUG:-erpnext}
+    restart: unless-stopped
+    depends_on:
+      erpnext-web:
+        condition: service_started
+    entrypoint: ["/bin/sh", "/docker/kdm-proxy-entrypoint.sh"]
+    volumes:
+      - ./docker/kdm-proxy-entrypoint.sh:/docker/kdm-proxy-entrypoint.sh:ro
+      - ./docker/kdm-frappe-proxy.conf.template:/templates/kdm-frappe-proxy.conf.template:ro
+    environment:
+      APP_SLUG:            ${APP_SLUG:-erpnext}
+      WORKSPACE_SLUG_SAFE: ${WORKSPACE_SLUG_SAFE:-0}
+    networks:
+      - erpnext-net
+      - platform_net
+
+  # ── ERPNext web (Frappe backend, internal only) ───────────────────────────────
   erpnext-web:
     image: ${ERPNEXT_IMAGE}
     restart: unless-stopped
@@ -31,8 +66,6 @@ services:
     volumes:
       - erpnext-sites:/home/frappe/frappe-bench/sites
       - erpnext-logs:/home/frappe/frappe-bench/logs
-    ports:
-      - "${ERPNEXT_PORT:-8080}:8000"
     networks:
       - erpnext-net
 
@@ -116,3 +149,7 @@ volumes:
 networks:
   erpnext-net:
     driver: bridge
+  # KDM platform network — nginx-gateway resolves container names on this network.
+  # Declared external so the KDM provisioner creates it once and all apps share it.
+  platform_net:
+    external: true

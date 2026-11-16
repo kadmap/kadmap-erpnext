@@ -1,0 +1,98 @@
+# KDM Frappe reverse-proxy configuration template.
+#
+# Processed by kdm-proxy-entrypoint.sh at container start via:
+#   envsubst '${APP_SLUG} ${WORKSPACE_SLUG_SAFE}' < this-file > /etc/nginx/conf.d/default.conf
+#
+# Only ${APP_SLUG} and ${WORKSPACE_SLUG_SAFE} are substituted — all other
+# nginx variables ($1, $is_args, $args, $erp_path, $host, etc.) are left
+# untouched so they resolve at nginx request time.
+#
+# Required env vars (injected by MKDM pipeline at deploy time):
+#   APP_SLUG           - the KDM marketplace slug for this app (e.g. kadmap-erpnext)
+#   WORKSPACE_SLUG_SAFE - workspace slug with hyphens → underscores (e.g. main_ws)
+
+server {
+    listen 80;
+    server_name _;
+
+    # ── ERPNext login — inject Authentik auto-redirect script ────────────────────
+    # Frappe builds the full Authentik authorization URL server-side (including the
+    # Redis-stored CSRF state), so we let the login page render then immediately
+    # click the Authentik button via injected JS rather than building the URL here.
+    location ~ ^/apps/[^/]+/${APP_SLUG}/login$ {
+        set $erp_path /login;
+        proxy_pass         http://erpnext-web:8000$erp_path$is_args$args;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto https;
+        proxy_set_header   X-Forwarded-Host  $host;
+        proxy_set_header   Accept-Encoding   "";
+        proxy_read_timeout 30s;
+        proxy_hide_header  X-Frame-Options;
+        proxy_cookie_flags ~ . samesite=none secure;
+
+        sub_filter_types text/html;
+        sub_filter_once  off;
+        sub_filter 'href="/assets/'  'href="/apps/${WORKSPACE_SLUG_SAFE}/${APP_SLUG}/assets/';
+        sub_filter 'src="/assets/'   'src="/apps/${WORKSPACE_SLUG_SAFE}/${APP_SLUG}/assets/';
+        sub_filter '"/assets/'       '"/apps/${WORKSPACE_SLUG_SAFE}/${APP_SLUG}/assets/';
+        sub_filter "'/assets/"       "'/apps/${WORKSPACE_SLUG_SAFE}/${APP_SLUG}/assets/";
+        sub_filter '</body>' '<script>document.addEventListener("DOMContentLoaded",function(){var a=document.querySelector(".btn-Authentik");if(a)window.location.href=a.href;});</script></body>';
+    }
+
+    # ── All other ERPNext paths ───────────────────────────────────────────────────
+    # Strip the /apps/{ws}/{slug} prefix before proxying to Frappe (port 8000).
+    # Frappe uses absolute asset paths (/assets/..., /files/...) that the browser
+    # requests at root; sub_filter rewrites them in HTML/JS responses to include
+    # the KDM subpath prefix so the browser requests the prefixed version which
+    # this location then strips back to / before proxying.
+    # Accept-Encoding "" disables upstream gzip so sub_filter can scan the body.
+    location ~ ^/apps/[^/]+/${APP_SLUG}(/.*)?$ {
+        set $erp_path $1;
+        if ($erp_path = "") { set $erp_path /; }
+
+        proxy_pass         http://erpnext-web:8000$erp_path$is_args$args;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto https;
+        proxy_set_header   X-Forwarded-Host  $host;
+        proxy_set_header   Upgrade           $http_upgrade;
+        proxy_set_header   Connection        "upgrade";
+        proxy_set_header   Accept-Encoding   "";
+        proxy_read_timeout 120s;
+        proxy_hide_header  X-Frame-Options;
+        proxy_hide_header  Content-Security-Policy;
+        proxy_cookie_flags ~ . samesite=none secure;
+
+        # Rewrite Frappe's server-side 301 /login?... redirects to include the
+        # workspace prefix so the browser lands on the proxied ERPNext login page.
+        proxy_redirect ~^/login(.*)$ /apps/${WORKSPACE_SLUG_SAFE}/${APP_SLUG}/login$1;
+
+        sub_filter_types text/html text/javascript application/javascript;
+        sub_filter_once  off;
+
+        # Rewrite absolute Frappe asset/file paths in HTML and JS so the browser
+        # requests them under the KDM sub-path.
+        sub_filter 'href="/assets/'  'href="/apps/${WORKSPACE_SLUG_SAFE}/${APP_SLUG}/assets/';
+        sub_filter 'src="/assets/'   'src="/apps/${WORKSPACE_SLUG_SAFE}/${APP_SLUG}/assets/';
+        sub_filter '"/assets/'       '"/apps/${WORKSPACE_SLUG_SAFE}/${APP_SLUG}/assets/';
+        sub_filter "'/assets/"       "'/apps/${WORKSPACE_SLUG_SAFE}/${APP_SLUG}/assets/";
+        sub_filter 'href="/files/'   'href="/apps/${WORKSPACE_SLUG_SAFE}/${APP_SLUG}/files/';
+        sub_filter 'src="/files/'    'src="/apps/${WORKSPACE_SLUG_SAFE}/${APP_SLUG}/files/';
+
+        # Inject a <head> script that teaches Frappe's SPA about the KDM subpath
+        # prefix. Frappe v15 hard-codes /app/... in its router; this patch
+        # intercepts fetch/XHR and monkey-patches the three router methods plus
+        # redirect_to_login at runtime so all SPA navigation stays within the
+        # /apps/{ws}/{slug}/ tree.
+        sub_filter '<head>' '<head><script>(function(){if(window.__kdmP)return;window.__kdmP=1;var parts=window.location.pathname.split("/");if(parts[1]!=="apps"||parts[3]!=="${APP_SLUG}")return;var P="/"+parts[1]+"/"+parts[2]+"/"+parts[3];if(window.caches){caches.keys().then(function(ks){for(var k of ks)caches.delete(k);})}if("serviceWorker"in navigator){navigator.serviceWorker.getRegistrations().then(function(r){for(var s of r)s.unregister();})}window.__kdmErrors=[];window.addEventListener("error",function(ev){window.__kdmErrors.push((ev.message||"")+" @"+(ev.filename||"")+(ev.lineno?":"+ev.lineno:""));},true);function fix(u){if(typeof u==="string"&&u.length>1&&u[0]==="/"&&u[1]!=="/"&&u.indexOf(P)!==0)return P+u;return u}var F=window.fetch;window.fetch=function(u,o){return F.call(this,fix(u),o)};var X=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(){var a=Array.prototype.slice.call(arguments);a[1]=fix(a[1]);return X.apply(this,a)};try{var oA=window.location.assign.bind(window.location);window.location.assign=function(u){oA(fix(u))};var oR=window.location.replace.bind(window.location);window.location.replace=function(u){oR(fix(u))};var locProto=Object.getPrototypeOf(window.location);var hd=Object.getOwnPropertyDescriptor(locProto,"href");if(hd&&hd.set){var origHref=hd.set;Object.defineProperty(locProto,"href",{get:hd.get,set:function(u){origHref.call(this,fix(u))},configurable:true});}}catch(_){}document.addEventListener("click",function(e){var el=e.target;while(el&&el.tagName!=="A")el=el.parentElement;if(!el)return;var h=el.getAttribute("href");var f=fix(h);if(f&&f!==h){e.preventDefault();window.location.assign(f);}},true);var done=false;function patchRouter(){if(done||!window.frappe||!frappe.router||!frappe.router.strip_prefix)return;done=true;var sp=frappe.router.strip_prefix.bind(frappe.router);frappe.router.strip_prefix=function(r){if(r&&r.indexOf&&r.indexOf(P)===0)r=r.slice(P.length)||"/";return sp(r)};var mu=frappe.router.make_url.bind(frappe.router);frappe.router.make_url=function(){var u=mu.apply(frappe.router,arguments);return fix(u)};var ia=frappe.router.is_app_route.bind(frappe.router);frappe.router.is_app_route=function(p){if(p&&p.indexOf&&p.indexOf(P)===0)p=p.slice(P.length)||"/";return ia(p)};function patchApp(){if(frappe.app&&!frappe.app.__kdmR){frappe.app.__kdmR=1;frappe.app.redirect_to_login=function(){window.location.href=P+"/login?redirect-to="+encodeURIComponent(window.location.pathname+window.location.search)}}}patchApp();var ta=setInterval(function(){patchApp();if(frappe.app&&frappe.app.__kdmR)clearInterval(ta)},5);setTimeout(function(){clearInterval(ta)},10000)}document.addEventListener("DOMContentLoaded",patchRouter);var t=setInterval(function(){patchRouter();if(done)clearInterval(t)},50);setTimeout(function(){clearInterval(t)},10000)})();</script>';
+    }
+
+    location / {
+        return 404;
+    }
+}
