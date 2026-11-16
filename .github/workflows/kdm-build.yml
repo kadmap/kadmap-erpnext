@@ -1,0 +1,103 @@
+name: KDM Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_tag:
+        description: "Version tag (e.g. v1.0.0 or main-abc1234)"
+        required: true
+      github_sha:
+        description: "Commit SHA to build (blank = HEAD)"
+        required: false
+        default: ""
+      callback_url:
+        description: "ISV API callback endpoint"
+        required: true
+      callback_token:
+        description: "Per-build authentication token"
+        required: true
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write        # needed to push to ghcr.io
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.github_sha || github.sha }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/${{ github.repository }}:${{ inputs.version_tag }}
+
+      - name: Notify ISV API
+        if: always()
+        run: |
+          python3 << 'EOF'
+          import json, urllib.request, os
+
+          compose = ""
+          for f in ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"):
+              try:
+                  compose = open(f).read(); break
+              except FileNotFoundError:
+                  pass
+
+          env_defaults = {}
+          for f in (".env.example", ".env.defaults", ".env.sample", ".env.template"):
+              try:
+                  for line in open(f):
+                      line = line.strip()
+                      if line and not line.startswith("#") and "=" in line:
+                          k, _, v = line.partition("=")
+                          env_defaults[k.strip()] = v.strip()
+                  break
+              except FileNotFoundError:
+                  pass
+
+          build_ok  = os.environ["BUILD_OUTCOME"] == "success"
+          repo      = os.environ["GITHUB_REPOSITORY"]
+          run_id    = os.environ["GITHUB_RUN_ID"]
+          version   = os.environ["INPUT_VERSION_TAG"]
+
+          payload = {
+              "callback_token":   os.environ["INPUT_CALLBACK_TOKEN"],
+              "status":           "ready" if build_ok else "failed",
+              "image_ref":        f"ghcr.io/{repo}:{version}" if build_ok else "",
+              "compose_template": compose,
+              "env_defaults":     env_defaults,
+              "run_url":          f"https://github.com/{repo}/actions/runs/{run_id}",
+          }
+
+          req = urllib.request.Request(
+              os.environ["INPUT_CALLBACK_URL"],
+              data=json.dumps(payload).encode(),
+              headers={"Content-Type": "application/json"},
+              method="POST",
+          )
+          with urllib.request.urlopen(req, timeout=30) as resp:
+              print(f"Callback: HTTP {resp.status}")
+          EOF
+        env:
+          BUILD_OUTCOME:        ${{ steps.build.outcome }}
+          INPUT_VERSION_TAG:    ${{ inputs.version_tag }}
+          INPUT_CALLBACK_URL:   ${{ inputs.callback_url }}
+          INPUT_CALLBACK_TOKEN: ${{ inputs.callback_token }}
