@@ -13,7 +13,7 @@
 #   See .env.example for the full list.
 
 ARG FRAPPE_BRANCH=develop
-ARG NODE_VERSION=22
+ARG NODE_VERSION=24
 ARG PYTHON_IMAGE=python:3.14-slim-trixie
 
 # ── Stage 1: builder ───────────────────────────────────────────────────────────
