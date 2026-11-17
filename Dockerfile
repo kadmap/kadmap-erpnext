@@ -70,7 +70,10 @@ WORKDIR /home/frappe/frappe-bench
 COPY --chown=frappe:frappe . apps/erpnext/
 
 # Install into the venv and build frontend assets
-RUN env/bin/pip install --no-cache-dir -e apps/erpnext \
+# git init: bench setup requirements calls git.Repo(apps/erpnext) to read app metadata;
+# .git is excluded by .dockerignore so we initialise a minimal repo to satisfy that check.
+RUN git -C apps/erpnext init \
+    && env/bin/pip install --no-cache-dir -e apps/erpnext \
     && bench setup requirements \
     && bench build --app erpnext
 
