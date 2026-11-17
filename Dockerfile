@@ -28,15 +28,15 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PATH=/opt/nvm/current/bin:/home/frappe/.local/bin:${PATH}
 
 # System build dependencies
-# redis-server is needed at build time: bench init calls `redis-server --version`
-# to generate Redis config even though Redis runs externally at runtime.
+# redis-server: bench init calls `redis-server --version` to generate Redis config
+# cron: bench init calls /usr/bin/crontab to set up backup schedules
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl wget git sudo \
     build-essential pkg-config \
     libffi-dev libmariadb-dev libpq-dev \
     libldap2-dev libsasl2-dev \
     libtiff-dev libwebp-dev libjpeg-dev \
-    redis-server \
+    redis-server cron \
     && rm -rf /var/lib/apt/lists/*
 
 # Node.js via nvm (same approach as frappe_docker)
