@@ -70,9 +70,14 @@ WORKDIR /home/frappe/frappe-bench
 COPY --chown=frappe:frappe . apps/erpnext/
 
 # Install into the venv and build frontend assets
-# git init: bench setup requirements calls git.Repo(apps/erpnext) to read app metadata;
-# .git is excluded by .dockerignore so we initialise a minimal repo to satisfy that check.
-RUN git -C apps/erpnext init \
+# bench setup requirements calls git.Repo() and git rev-parse --abbrev-ref HEAD on the app
+# directory. .git is excluded by .dockerignore, so we seed a minimal repo with one commit
+# so that HEAD resolves to a branch name (an empty init leaves HEAD unborn → exit 128).
+RUN git -C apps/erpnext init -b develop \
+    && git -C apps/erpnext config user.email "build@docker" \
+    && git -C apps/erpnext config user.name "Docker Build" \
+    && git -C apps/erpnext add -A \
+    && git -C apps/erpnext commit -m "build" \
     && env/bin/pip install --no-cache-dir -e apps/erpnext \
     && bench setup requirements \
     && bench build --app erpnext
