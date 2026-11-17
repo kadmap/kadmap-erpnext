@@ -80,12 +80,18 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PATH=/opt/nvm/current/bin:/home/frappe/.local/bin:${PATH}
 
 # Runtime system dependencies only
+# wkhtmltopdf was dropped from Debian Trixie apt repos; install from upstream .deb
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl git \
     libmariadb3 libpq5 \
     mariadb-client \
     redis-tools \
-    xfonts-75dpi xfonts-base wkhtmltopdf \
+    xfonts-75dpi xfonts-base \
+    && ARCH=$(dpkg --print-architecture) \
+    && curl -fsSL "https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.bookworm_${ARCH}.deb" \
+        -o /tmp/wkhtmltox.deb \
+    && apt-get install -y --no-install-recommends /tmp/wkhtmltox.deb \
+    && rm /tmp/wkhtmltox.deb \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -s /bin/bash frappe \
