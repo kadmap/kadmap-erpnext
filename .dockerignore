@@ -43,7 +43,7 @@ htmlcov
 Thumbs.db
 
 # Documentation (not needed at runtime)
-*.md
+# *.md intentionally NOT excluded — flit_core reads README.md via pyproject.toml at build time
 docs
 
 # Local env files (secrets — never bake into the image)
