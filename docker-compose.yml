@@ -23,6 +23,10 @@ services:
   # WORKSPACE_SLUG_SAFE into the nginx config template, then starts nginx.
   # This sidecar strips the /apps/{ws}/{slug} prefix and handles all Frappe
   # sub_filter rewrites so the upstream KDM nginx needs no Frappe-specific code.
+  #
+  # Both the entrypoint script and the nginx config template are embedded inline
+  # via Docker Compose configs so this file is fully self-contained — no bind
+  # mounts to ./docker/ files are required in the KDM instance directory.
   erpnext-proxy:
     image: nginx:alpine
     container_name: ${APP_SLUG:-erpnext}_ws_${WORKSPACE_SLUG_SAFE:-0}_${APP_SLUG:-erpnext}
@@ -31,9 +35,12 @@ services:
       erpnext-web:
         condition: service_started
     entrypoint: ["/bin/sh", "/docker/kdm-proxy-entrypoint.sh"]
-    volumes:
-      - ./docker/kdm-proxy-entrypoint.sh:/docker/kdm-proxy-entrypoint.sh:ro
-      - ./docker/kdm-frappe-proxy.conf.template:/templates/kdm-frappe-proxy.conf.template:ro
+    configs:
+      - source: kdm-proxy-entrypoint
+        target: /docker/kdm-proxy-entrypoint.sh
+        mode: 0555
+      - source: kdm-frappe-proxy-conf
+        target: /templates/kdm-frappe-proxy.conf.template
     environment:
       APP_SLUG:            ${APP_SLUG:-erpnext}
       WORKSPACE_SLUG_SAFE: ${WORKSPACE_SLUG_SAFE:-0}
@@ -153,3 +160,105 @@ networks:
   # Declared external so the KDM provisioner creates it once and all apps share it.
   platform_net:
     external: true
+
+# ── Inline support files ──────────────────────────────────────────────────────
+# Both files are embedded here so this compose file is fully self-contained.
+# The KDM provisioner writes only docker-compose.yml to the instance directory;
+# no ./docker/ subdirectory exists there.
+#
+# IMPORTANT: Docker Compose interpolates ${VAR} in content: blocks, so every $
+# that must reach the container as a literal $ is written as $$ here.
+# The $$ → $ rule means:
+#   $$erp_path  in YAML → $erp_path  in file → nginx runtime variable
+#   $${APP_SLUG} in YAML → ${APP_SLUG} in file → envsubst substitutes at start-up
+configs:
+
+  # Entrypoint: runs envsubst on the nginx template then starts nginx.
+  kdm-proxy-entrypoint:
+    content: |
+      #!/bin/sh
+      set -e
+
+      : "$${APP_SLUG:?APP_SLUG must be set}"
+      : "$${WORKSPACE_SLUG_SAFE:?WORKSPACE_SLUG_SAFE must be set}"
+
+      envsubst '$${APP_SLUG} $${WORKSPACE_SLUG_SAFE}' \
+          < /templates/kdm-frappe-proxy.conf.template \
+          > /etc/nginx/conf.d/default.conf
+
+      exec nginx -g "daemon off;"
+
+  # Nginx config template: ${APP_SLUG} and ${WORKSPACE_SLUG_SAFE} are
+  # substituted by the entrypoint script via envsubst at container start-up.
+  # All other nginx runtime variables ($$host, $$erp_path, etc.) are written
+  # with $$ here so they survive Docker Compose interpolation and reach nginx
+  # as plain $variable references.
+  kdm-frappe-proxy-conf:
+    content: |
+      server {
+          listen 80;
+          server_name _;
+
+          # ── ERPNext login — inject Authentik auto-redirect script ────────────────────
+          location ~ ^/apps/[^/]+/$${APP_SLUG}/login$ {
+              set $$erp_path /login;
+              proxy_pass         http://erpnext-web:8000$$erp_path$$is_args$$args;
+              proxy_http_version 1.1;
+              proxy_set_header   Host              $$host;
+              proxy_set_header   X-Real-IP         $$remote_addr;
+              proxy_set_header   X-Forwarded-For   $$proxy_add_x_forwarded_for;
+              proxy_set_header   X-Forwarded-Proto https;
+              proxy_set_header   X-Forwarded-Host  $$host;
+              proxy_set_header   Accept-Encoding   "";
+              proxy_read_timeout 30s;
+              proxy_hide_header  X-Frame-Options;
+              proxy_cookie_flags ~ . samesite=none secure;
+
+              sub_filter_types text/html;
+              sub_filter_once  off;
+              sub_filter 'href="/assets/'  'href="/apps/$${WORKSPACE_SLUG_SAFE}/$${APP_SLUG}/assets/';
+              sub_filter 'src="/assets/'   'src="/apps/$${WORKSPACE_SLUG_SAFE}/$${APP_SLUG}/assets/';
+              sub_filter '"/assets/'       '"/apps/$${WORKSPACE_SLUG_SAFE}/$${APP_SLUG}/assets/';
+              sub_filter "'/assets/"       "'/apps/$${WORKSPACE_SLUG_SAFE}/$${APP_SLUG}/assets/";
+              sub_filter '</body>' '<script>document.addEventListener("DOMContentLoaded",function(){var a=document.querySelector(".btn-Authentik");if(a)window.location.href=a.href;});</script></body>';
+          }
+
+          # ── All other ERPNext paths ───────────────────────────────────────────────────
+          location ~ ^/apps/[^/]+/$${APP_SLUG}(/.*)?$ {
+              set $$erp_path $1;
+              if ($$erp_path = "") { set $$erp_path /; }
+
+              proxy_pass         http://erpnext-web:8000$$erp_path$$is_args$$args;
+              proxy_http_version 1.1;
+              proxy_set_header   Host              $$host;
+              proxy_set_header   X-Real-IP         $$remote_addr;
+              proxy_set_header   X-Forwarded-For   $$proxy_add_x_forwarded_for;
+              proxy_set_header   X-Forwarded-Proto https;
+              proxy_set_header   X-Forwarded-Host  $$host;
+              proxy_set_header   Upgrade           $$http_upgrade;
+              proxy_set_header   Connection        "upgrade";
+              proxy_set_header   Accept-Encoding   "";
+              proxy_read_timeout 120s;
+              proxy_hide_header  X-Frame-Options;
+              proxy_hide_header  Content-Security-Policy;
+              proxy_cookie_flags ~ . samesite=none secure;
+
+              proxy_redirect ~^/login(.*)$ /apps/$${WORKSPACE_SLUG_SAFE}/$${APP_SLUG}/login$1;
+
+              sub_filter_types text/html text/javascript application/javascript;
+              sub_filter_once  off;
+
+              sub_filter 'href="/assets/'  'href="/apps/$${WORKSPACE_SLUG_SAFE}/$${APP_SLUG}/assets/';
+              sub_filter 'src="/assets/'   'src="/apps/$${WORKSPACE_SLUG_SAFE}/$${APP_SLUG}/assets/';
+              sub_filter '"/assets/'       '"/apps/$${WORKSPACE_SLUG_SAFE}/$${APP_SLUG}/assets/';
+              sub_filter "'/assets/"       "'/apps/$${WORKSPACE_SLUG_SAFE}/$${APP_SLUG}/assets/";
+              sub_filter 'href="/files/'   'href="/apps/$${WORKSPACE_SLUG_SAFE}/$${APP_SLUG}/files/';
+              sub_filter 'src="/files/'    'src="/apps/$${WORKSPACE_SLUG_SAFE}/$${APP_SLUG}/files/';
+
+              sub_filter '<head>' '<head><script>(function(){if(window.__kdmP)return;window.__kdmP=1;var parts=window.location.pathname.split("/");if(parts[1]!=="apps"||parts[3]!=="$${APP_SLUG}")return;var P="/"+parts[1]+"/"+parts[2]+"/"+parts[3];if(window.caches){caches.keys().then(function(ks){for(var k of ks)caches.delete(k);})}if("serviceWorker"in navigator){navigator.serviceWorker.getRegistrations().then(function(r){for(var s of r)s.unregister();})}window.__kdmErrors=[];window.addEventListener("error",function(ev){window.__kdmErrors.push((ev.message||"")+" @"+(ev.filename||"")+(ev.lineno?":"+ev.lineno:""));},true);function fix(u){if(typeof u==="string"&&u.length>1&&u[0]==="/"&&u[1]!=="/"&&u.indexOf(P)!==0)return P+u;return u}var F=window.fetch;window.fetch=function(u,o){return F.call(this,fix(u),o)};var X=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(){var a=Array.prototype.slice.call(arguments);a[1]=fix(a[1]);return X.apply(this,a)};try{var oA=window.location.assign.bind(window.location);window.location.assign=function(u){oA(fix(u))};var oR=window.location.replace.bind(window.location);window.location.replace=function(u){oR(fix(u))};var locProto=Object.getPrototypeOf(window.location);var hd=Object.getOwnPropertyDescriptor(locProto,"href");if(hd&&hd.set){var origHref=hd.set;Object.defineProperty(locProto,"href",{get:hd.get,set:function(u){origHref.call(this,fix(u))},configurable:true});}}catch(_){}document.addEventListener("click",function(e){var el=e.target;while(el&&el.tagName!=="A")el=el.parentElement;if(!el)return;var h=el.getAttribute("href");var f=fix(h);if(f&&f!==h){e.preventDefault();window.location.assign(f);}},true);var done=false;function patchRouter(){if(done||!window.frappe||!frappe.router||!frappe.router.strip_prefix)return;done=true;var sp=frappe.router.strip_prefix.bind(frappe.router);frappe.router.strip_prefix=function(r){if(r&&r.indexOf&&r.indexOf(P)===0)r=r.slice(P.length)||"/";return sp(r)};var mu=frappe.router.make_url.bind(frappe.router);frappe.router.make_url=function(){var u=mu.apply(frappe.router,arguments);return fix(u)};var ia=frappe.router.is_app_route.bind(frappe.router);frappe.router.is_app_route=function(p){if(p&&p.indexOf&&p.indexOf(P)===0)p=p.slice(P.length)||"/";return ia(p)};function patchApp(){if(frappe.app&&!frappe.app.__kdmR){frappe.app.__kdmR=1;frappe.app.redirect_to_login=function(){window.location.href=P+"/login?redirect-to="+encodeURIComponent(window.location.pathname+window.location.search)}}}patchApp();var ta=setInterval(function(){patchApp();if(frappe.app&&frappe.app.__kdmR)clearInterval(ta)},5);setTimeout(function(){clearInterval(ta)},10000)}document.addEventListener("DOMContentLoaded",patchRouter);var t=setInterval(function(){patchRouter();if(done)clearInterval(t)},50);setTimeout(function(){clearInterval(t)},10000)})();</script>';
+          }
+
+          location / {
+              return 404;
+          }
+      }
