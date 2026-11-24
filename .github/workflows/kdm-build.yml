@@ -28,8 +28,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.github_sha || github.sha }}
           fetch-depth: 0
+
+      - name: Checkout specific SHA
+        if: ${{ inputs.github_sha != '' }}
+        run: git checkout ${{ inputs.github_sha }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
