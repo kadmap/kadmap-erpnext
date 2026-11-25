@@ -108,6 +108,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN useradd -m -s /bin/bash frappe \
     && git config --system --add safe.directory '*'
 
+# Newer mariadb-client packages default ssl-mode to REQUIRED. The companion db
+# service uses no SSL certs, so both bench's internal mariadb CLI calls and
+# mariadb-admin fail with "SSL is required, but the server does not support it".
+# Writing [client] ssl=false here disables SSL enforcement for every mariadb/mysql
+# client binary invoked inside this container, regardless of which user runs it.
+RUN mkdir -p /etc/mysql/mariadb.conf.d \
+    && printf '[client]\nssl = false\n' > /etc/mysql/mariadb.conf.d/99-no-ssl.cnf
+
 # bench CLI is installed via pip in Stage 1 but that /usr/local/bin/bench is
 # not copied to Stage 2. Reinstall here so bench is on PATH in the runtime image.
 RUN pip install --no-cache-dir frappe-bench
