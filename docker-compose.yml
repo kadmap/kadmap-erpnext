@@ -231,6 +231,11 @@ configs:
           listen 80;
           server_name _;
 
+          # Docker's internal DNS — required because proxy_pass uses $erp_path
+          # (a runtime variable), which forces nginx to resolve the upstream
+          # hostname dynamically at request time rather than at startup.
+          resolver 127.0.0.11 valid=30s;
+
           # ── ERPNext login — inject Authentik auto-redirect script ────────────────────
           location ~ ^/apps/[^/]+/$${APP_SLUG}/login$ {
               set $$erp_path /login;
