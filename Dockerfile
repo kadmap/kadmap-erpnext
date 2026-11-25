@@ -108,6 +108,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN useradd -m -s /bin/bash frappe \
     && git config --system --add safe.directory '*'
 
+# bench CLI is installed via pip in Stage 1 but that /usr/local/bin/bench is
+# not copied to Stage 2. Reinstall here so bench is on PATH in the runtime image.
+RUN pip install --no-cache-dir frappe-bench
+
 # Copy the fully-built bench and Node runtime from the builder
 COPY --from=builder --chown=frappe:frappe /home/frappe/frappe-bench /home/frappe/frappe-bench
 COPY --from=builder /opt/nvm /opt/nvm
