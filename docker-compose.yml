@@ -53,6 +53,8 @@ services:
     image: ${ERPNEXT_IMAGE}
     restart: unless-stopped
     depends_on:
+      erpnext-configurator:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       redis-cache:
@@ -83,7 +85,10 @@ services:
     entrypoint: []
     command: ["bench", "--site", "${FRAPPE_SITE_NAME:-erpnext.localhost}", "worker", "--queue", "default,short,long"]
     depends_on:
-      - erpnext-web
+      erpnext-configurator:
+        condition: service_completed_successfully
+      erpnext-web:
+        condition: service_started
     environment:
       FRAPPE_SITE_NAME: ${FRAPPE_SITE_NAME:-erpnext.localhost}
       DB_HOST:          db
@@ -102,7 +107,10 @@ services:
     entrypoint: []
     command: ["bench", "--site", "${FRAPPE_SITE_NAME:-erpnext.localhost}", "schedule"]
     depends_on:
-      - erpnext-web
+      erpnext-configurator:
+        condition: service_completed_successfully
+      erpnext-web:
+        condition: service_started
     environment:
       FRAPPE_SITE_NAME: ${FRAPPE_SITE_NAME:-erpnext.localhost}
       DB_HOST:          db
@@ -145,6 +153,30 @@ services:
   redis-queue:
     image: redis:7-alpine
     restart: unless-stopped
+    networks:
+      - erpnext-net
+
+  # ── One-shot configurator ─────────────────────────────────────────────────────
+  # bench init bakes localhost port numbers into common_site_config.json at build
+  # time. This service runs once before web/worker/scheduler start and overwrites
+  # those values with the actual Docker service-name URLs.
+  erpnext-configurator:
+    image: ${ERPNEXT_IMAGE}
+    restart: "no"
+    entrypoint: []
+    command:
+      - sh
+      - -c
+      - >-
+        bench set-config -g db_host db &&
+        bench set-config -g redis_cache redis://redis-cache:6379/0 &&
+        bench set-config -g redis_queue redis://redis-queue:6379/0 &&
+        bench set-config -g redis_socketio redis://redis-queue:6379/0
+    depends_on:
+      - redis-cache
+      - redis-queue
+    volumes:
+      - erpnext-sites:/home/frappe/frappe-bench/sites
     networks:
       - erpnext-net
 

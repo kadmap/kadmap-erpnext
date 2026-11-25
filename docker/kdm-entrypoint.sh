@@ -29,7 +29,7 @@ log() { echo "[KDM] $*"; }
 
 # ── Wait for MariaDB ───────────────────────────────────────────────────────────
 log "Waiting for MariaDB on ${DB_HOST}:3306 ..."
-until mariadb-admin ping -h "${DB_HOST}" -u root -p"${MYSQL_ROOT_PASSWORD:-}" --silent 2>/dev/null; do
+until mariadb-admin ping -h "${DB_HOST}" -u root --password="${MYSQL_ROOT_PASSWORD:-}" --silent 2>/dev/null; do
     sleep 2
 done
 log "MariaDB is ready."
