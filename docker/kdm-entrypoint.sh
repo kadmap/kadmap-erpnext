@@ -54,6 +54,15 @@ else
     ${BENCH} migrate
 fi
 
+# ── Set public server URL ──────────────────────────────────────────────────────
+# APP_PUBLIC_URL is injected by the KDM provisioner and is the URL the browser
+# uses to reach this ERPNext instance.  Frappe uses frappe_server_url to build
+# absolute links in emails, OAuth2 redirects, etc.
+if [ -n "${APP_PUBLIC_URL:-}" ]; then
+    log "Setting frappe_server_url to ${APP_PUBLIC_URL} ..."
+    ${BENCH} set-config frappe_server_url "${APP_PUBLIC_URL}"
+fi
+
 # ── Disable password login ─────────────────────────────────────────────────────
 log "Disabling password-based login ..."
 ${BENCH} set-config disable_user_pass_login 1

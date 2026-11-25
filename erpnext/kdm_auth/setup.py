@@ -23,10 +23,18 @@ def seed_authentik_provider():
     client_id = os.environ.get("OIDC_CLIENT_ID", "")
     client_secret = os.environ.get("OIDC_CLIENT_SECRET", "")
     app_slug = os.environ.get("OIDC_APP_SLUG", "erpnext")
+    app_public_url = os.environ.get("APP_PUBLIC_URL", "").rstrip("/")
 
     if not all([authentik_url, client_id, client_secret]):
         frappe.log_error(
             "KDM: AUTHENTIK_URL, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET must all be set",
+            "KDM OIDC Setup",
+        )
+        return
+
+    if not app_public_url:
+        frappe.log_error(
+            "KDM: APP_PUBLIC_URL is not set — cannot configure OAuth2 redirect URL",
             "KDM OIDC Setup",
         )
         return
@@ -39,6 +47,8 @@ def seed_authentik_provider():
         doc = frappe.new_doc("Social Login Key")
         doc.name = provider_name
 
+    redirect_url = f"{app_public_url}/api/method/frappe.integrations.oauth2_logins.custom"
+
     doc.update(
         {
             "enable_social_login": 1,
@@ -50,6 +60,7 @@ def seed_authentik_provider():
             "authorize_url": f"{authentik_url}/application/o/{app_slug}/authorize/",
             "access_token_url": f"{authentik_url}/application/o/{app_slug}/token/",
             "api_endpoint": f"{authentik_url}/application/o/userinfo/",
+            "redirect_url": redirect_url,
             "redirect_to": "/desk",
             "user_id_property": "sub",
             "icon": f"{authentik_url}/application/o/{app_slug}/icon/",
@@ -58,4 +69,4 @@ def seed_authentik_provider():
     doc.save(ignore_permissions=True)
     frappe.db.commit()
 
-    frappe.logger().info("KDM: Authentik Social Login Key seeded for %s", authentik_url)
+    frappe.logger().info("KDM: Authentik Social Login Key seeded for %s → %s", authentik_url, redirect_url)

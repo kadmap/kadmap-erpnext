@@ -69,6 +69,7 @@ services:
       OIDC_APP_SLUG:         ${OIDC_APP_SLUG:-erpnext}
       MYSQL_ROOT_PASSWORD:   ${MYSQL_ROOT_PASSWORD}
       FRAPPE_ADMIN_PASSWORD: ${FRAPPE_ADMIN_PASSWORD}
+      APP_PUBLIC_URL:        ${APP_PUBLIC_URL}
       DB_HOST:               db
       REDIS_CACHE:           redis-cache:6379
       REDIS_QUEUE:           redis-queue:6379
