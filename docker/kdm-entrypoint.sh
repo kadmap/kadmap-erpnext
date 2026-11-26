@@ -54,6 +54,12 @@ else
     ${BENCH} migrate
 fi
 
+# Frappe routes incoming requests by matching the Host header to a site
+# directory name. The site is named 'erpnext.localhost' but the KDM nginx
+# forwards the real KDM hostname (e.g. kdm-xxx.local). Writing currentsite.txt
+# makes Frappe use this site as the fallback for any unmatched hostname.
+echo "${SITE}" > sites/currentsite.txt
+
 # ── Set public server URL ──────────────────────────────────────────────────────
 # APP_PUBLIC_URL is injected by the KDM provisioner and is the URL the browser
 # uses to reach this ERPNext instance.  Frappe uses frappe_server_url to build
@@ -74,4 +80,10 @@ ${BENCH} execute erpnext.kdm_auth.setup.seed_authentik_provider
 log "OIDC configuration complete.  Starting: $*"
 
 # ── Hand off to the main process ──────────────────────────────────────────────
+# For bench serve, inject --site so Frappe runs in single-site mode.
+# Without it, bench serve starts in multi-site mode and routes by Host header,
+# which will not match the internal site name (erpnext.localhost).
+if [ "${1:-}" = "bench" ] && [ "${2:-}" = "serve" ]; then
+    exec bench serve --site "${SITE}" "${@:3}"
+fi
 exec "$@"
