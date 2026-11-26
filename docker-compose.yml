@@ -69,22 +69,24 @@ services:
       redis-queue:
         condition: service_started
     environment:
-      FRAPPE_SITE_NAME:      ${FRAPPE_SITE_NAME:-erpnext.localhost}
-      AUTHENTIK_URL:         ${AUTHENTIK_URL}
-      OIDC_CLIENT_ID:        ${OIDC_CLIENT_ID}
-      OIDC_CLIENT_SECRET:    ${OIDC_CLIENT_SECRET}
-      OIDC_APP_SLUG:         ${OIDC_APP_SLUG:-erpnext}
-      MYSQL_ROOT_PASSWORD:   ${MYSQL_ROOT_PASSWORD}
-      FRAPPE_ADMIN_PASSWORD: ${FRAPPE_ADMIN_PASSWORD}
-      APP_PUBLIC_URL:        ${APP_PUBLIC_URL}
-      DB_HOST:               db
-      REDIS_CACHE:           redis-cache:6379
-      REDIS_QUEUE:           redis-queue:6379
+      FRAPPE_SITE_NAME:        ${FRAPPE_SITE_NAME:-erpnext.localhost}
+      AUTHENTIK_URL:           ${AUTHENTIK_URL}
+      AUTHENTIK_INTERNAL_URL:  ${AUTHENTIK_INTERNAL_URL}
+      OIDC_CLIENT_ID:          ${OIDC_CLIENT_ID}
+      OIDC_CLIENT_SECRET:      ${OIDC_CLIENT_SECRET}
+      OIDC_APP_SLUG:           ${OIDC_APP_SLUG:-erpnext}
+      MYSQL_ROOT_PASSWORD:     ${MYSQL_ROOT_PASSWORD}
+      FRAPPE_ADMIN_PASSWORD:   ${FRAPPE_ADMIN_PASSWORD}
+      APP_PUBLIC_URL:          ${APP_PUBLIC_URL}
+      DB_HOST:                 db
+      REDIS_CACHE:             redis-cache:6379
+      REDIS_QUEUE:             redis-queue:6379
     volumes:
       - erpnext-sites:/home/frappe/frappe-bench/sites
       - erpnext-logs:/home/frappe/frappe-bench/logs
     networks:
       - erpnext-net
+      - platform_net
 
   # ── Background job worker ────────────────────────────────────────────────────
   erpnext-worker:
@@ -244,29 +246,14 @@ configs:
           # hostname dynamically at request time rather than at startup.
           resolver 127.0.0.11 valid=30s;
 
-          # ── ERPNext login — inject Authentik auto-redirect script ────────────────────
+          # ── ERPNext login — bypass login page, redirect straight to Authentik OIDC ──
+          # The user is always authenticated via Authentik (k-client-native session),
+          # so we skip the Frappe login page entirely. nginx issues a 302 directly to
+          # Frappe's social-login initiation endpoint. Frappe redirects to Authentik;
+          # Authentik sees the existing session and immediately redirects back with an
+          # auth code; Frappe completes the exchange and sets the ERPNext session cookie.
           location ~ ^/apps/[^/]+/$${APP_SLUG}/login$ {
-              set $$erp_path /login;
-              proxy_pass         http://erpnext-web:8000$$erp_path$$is_args$$args;
-              proxy_http_version 1.1;
-              proxy_set_header   Host                  $$host;
-              proxy_set_header   X-Frappe-Site-Name    $${FRAPPE_SITE_NAME};
-              proxy_set_header   X-Real-IP         $$remote_addr;
-              proxy_set_header   X-Forwarded-For   $$proxy_add_x_forwarded_for;
-              proxy_set_header   X-Forwarded-Proto https;
-              proxy_set_header   X-Forwarded-Host  $$host;
-              proxy_set_header   Accept-Encoding   "";
-              proxy_read_timeout 30s;
-              proxy_hide_header  X-Frame-Options;
-              proxy_cookie_flags ~ . samesite=none secure;
-
-              sub_filter_types text/html;
-              sub_filter_once  off;
-              sub_filter 'href="/assets/'  'href="/apps/$${WORKSPACE_SLUG_SAFE}/$${APP_SLUG}/assets/';
-              sub_filter 'src="/assets/'   'src="/apps/$${WORKSPACE_SLUG_SAFE}/$${APP_SLUG}/assets/';
-              sub_filter '"/assets/'       '"/apps/$${WORKSPACE_SLUG_SAFE}/$${APP_SLUG}/assets/';
-              sub_filter "'/assets/"       "'/apps/$${WORKSPACE_SLUG_SAFE}/$${APP_SLUG}/assets/";
-              sub_filter '</body>' '<script>document.addEventListener("DOMContentLoaded",function(){var a=document.querySelector(".btn-Authentik");if(a)window.location.href=a.href;});</script></body>';
+              return 302 /apps/$${WORKSPACE_SLUG_SAFE}/$${APP_SLUG}/api/method/frappe.integrations.oauth2_logins.login_via_provider?provider=Authentik;
           }
 
           # ── All other ERPNext paths ───────────────────────────────────────────────────

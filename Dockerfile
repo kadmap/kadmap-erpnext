@@ -80,7 +80,7 @@ RUN git -C apps/erpnext init -b develop \
     && git -C apps/erpnext commit -m "build" \
     && env/bin/pip install --no-cache-dir -e apps/erpnext \
     && bench setup requirements \
-    && bench build --app erpnext
+    && bench build
 
 # ── Stage 2: production ────────────────────────────────────────────────────────
 FROM ${PYTHON_IMAGE} AS production

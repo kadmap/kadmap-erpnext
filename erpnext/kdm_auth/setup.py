@@ -19,7 +19,11 @@ import frappe
 
 
 def seed_authentik_provider():
+    # Browser-facing URL — used in authorize redirects (the browser must reach it).
     authentik_url = os.environ.get("AUTHENTIK_URL", "").rstrip("/")
+    # Container-to-container URL — used for token exchange and userinfo calls that
+    # never leave the Docker network. Falls back to the public URL if not set.
+    authentik_internal_url = os.environ.get("AUTHENTIK_INTERNAL_URL", authentik_url).rstrip("/")
     client_id = os.environ.get("OIDC_CLIENT_ID", "")
     client_secret = os.environ.get("OIDC_CLIENT_SECRET", "")
     app_slug = os.environ.get("OIDC_APP_SLUG", "erpnext")
@@ -57,9 +61,12 @@ def seed_authentik_provider():
             "client_secret": client_secret,
             "base_url": authentik_url,
             "custom_base_url": 1,
+            # authorize_url is visited by the browser — must use the public URL.
             "authorize_url": f"{authentik_url}/application/o/{app_slug}/authorize/",
-            "access_token_url": f"{authentik_url}/application/o/{app_slug}/token/",
-            "api_endpoint": f"{authentik_url}/application/o/userinfo/",
+            # access_token_url and api_endpoint are called server-to-server — use the
+            # internal Docker network URL so the request never leaves the host.
+            "access_token_url": f"{authentik_internal_url}/application/o/{app_slug}/token/",
+            "api_endpoint": f"{authentik_internal_url}/application/o/userinfo/",
             "redirect_url": redirect_url,
             "redirect_to": "/desk",
             "user_id_property": "sub",
