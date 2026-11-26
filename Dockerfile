@@ -134,4 +134,4 @@ WORKDIR /home/frappe/frappe-bench
 EXPOSE 8000
 
 ENTRYPOINT ["/usr/local/bin/kdm-entrypoint"]
-CMD ["bench", "serve", "--port", "8000", "--host", "0.0.0.0", "--noreloader"]
+CMD ["bench", "serve", "--port", "8000", "--host", "0.0.0.0", "--noreload"]
