@@ -33,7 +33,7 @@ services:
     restart: unless-stopped
     depends_on:
       erpnext-web:
-        condition: service_started
+        condition: service_healthy
     entrypoint: ["/bin/sh", "/docker/kdm-proxy-entrypoint.sh"]
     configs:
       - source: kdm-proxy-entrypoint
@@ -53,6 +53,12 @@ services:
   erpnext-web:
     image: ${ERPNEXT_IMAGE}
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "cat /proc/net/tcp6 2>/dev/null | grep -q 00001F40 || cat /proc/net/tcp | grep -q 1F40"]
+      interval: 15s
+      timeout: 5s
+      retries: 40
+      start_period: 600s
     depends_on:
       erpnext-configurator:
         condition: service_completed_successfully

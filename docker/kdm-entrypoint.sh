@@ -56,11 +56,17 @@ fi
 
 # ── Set public server URL ──────────────────────────────────────────────────────
 # APP_PUBLIC_URL is injected by the KDM provisioner and is the URL the browser
-# uses to reach this ERPNext instance.  Frappe uses frappe_server_url to build
-# absolute links in emails, OAuth2 redirects, etc.
+# uses to reach this ERPNext instance.
+#
+# frappe_server_url — used by Frappe for OAuth2 redirects and email links.
+# cdn_url           — used by Frappe to build ALL static asset URLs in HTML.
+#                     Without this, Frappe emits /assets/... paths that the
+#                     browser requests without the KDM sub-path prefix, causing
+#                     CSS/JS to 404 through the KDM nginx gateway.
 if [ -n "${APP_PUBLIC_URL:-}" ]; then
-    log "Setting frappe_server_url to ${APP_PUBLIC_URL} ..."
+    log "Setting frappe_server_url and cdn_url to ${APP_PUBLIC_URL} ..."
     ${BENCH} set-config frappe_server_url "${APP_PUBLIC_URL}"
+    ${BENCH} set-config cdn_url "${APP_PUBLIC_URL}"
 fi
 
 # ── Disable password login ─────────────────────────────────────────────────────
