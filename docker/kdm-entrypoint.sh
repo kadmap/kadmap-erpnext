@@ -5,13 +5,18 @@
 # On first run it creates the Frappe site and installs ERPNext.
 # On subsequent runs it applies any pending migrations.
 #
-# Authentication is handled entirely by the KDM trusted-session hook
-# (erpnext.kdm_auth.session.auto_login_from_kdm_session) — no OIDC setup needed.
+# Authentication is handled by Authentik OIDC, automatically provisioned at
+# deploy time by the KDM provisioner. This script creates the Frappe Social
+# Login Key from the injected env vars so the OIDC redirect flow works.
 #
 # Required env vars (injected by KDM provisioner):
 #   MYSQL_ROOT_PASSWORD     MariaDB root password (only needed on first run)
 #   FRAPPE_ADMIN_PASSWORD   ERPNext Administrator password (only needed on first run)
-#   KDM_API_INTERNAL_URL    Internal URL of the KDM Django API (default: http://django-api:8000)
+#   OIDC_CLIENT_ID          Authentik OAuth2 client ID
+#   OIDC_CLIENT_SECRET      Authentik OAuth2 client secret
+#   OIDC_APP_SLUG           Authentik application slug (e.g. erpnext-from-kadmap-ws-general)
+#   AUTHENTIK_URL           Browser-facing KDM URL (e.g. https://kdm-serial.local)
+#   APP_PUBLIC_URL          Public URL of this ERPNext instance
 #
 # Optional:
 #   FRAPPE_SITE_NAME        site name in bench  (default: erpnext.localhost)
@@ -68,10 +73,18 @@ if [ -n "${APP_PUBLIC_URL:-}" ]; then
     ${BENCH} set-config cdn_url "${APP_PUBLIC_URL}"
 fi
 
-# ── Disable password login ─────────────────────────────────────────────────────
-# Auth is handled by the KDM trusted-session hook; password login is not needed.
-log "Disabling password-based login ..."
-${BENCH} set-config disable_user_pass_login 1
+# ── Configure Authentik OIDC (creates/updates Social Login Key) ───────────────
+# seed_authentik_provider creates the "Authentik" Social Login Key from the
+# OIDC env vars injected by the provisioner.
+# If env vars are missing (non-OIDC environment) the function exits with code 1
+# — in that case we keep password login enabled rather than locking admins out.
+log "Configuring Authentik OIDC provider ..."
+if ${BENCH} execute erpnext.kdm_auth.setup.seed_authentik_provider; then
+    log "Authentik OIDC configured. Disabling password-based login ..."
+    ${BENCH} set-config disable_user_pass_login 1
+else
+    log "WARNING: OIDC not fully configured — password login remains enabled."
+fi
 
 log "KDM auth configured.  Starting: $*"
 
