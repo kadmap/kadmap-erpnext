@@ -2,20 +2,19 @@
 # KDM ERPNext entrypoint
 #
 # Runs before the main process (web / worker / scheduler).
-# On first run it creates the Frappe site, installs ERPNext, then seeds the
-# Authentik OIDC config.  On subsequent runs it just applies any pending
-# migrations and re-seeds the OIDC config (safe to call repeatedly).
+# On first run it creates the Frappe site and installs ERPNext.
+# On subsequent runs it applies any pending migrations.
 #
-# Required env vars (injected by MKDM pipeline at deploy time):
-#   AUTHENTIK_URL           https://auth.yourdomain.local
-#   OIDC_CLIENT_ID          client ID from the Authentik OAuth2 provider app
-#   OIDC_CLIENT_SECRET      client secret from the Authentik OAuth2 provider app
+# Authentication is handled entirely by the KDM trusted-session hook
+# (erpnext.kdm_auth.session.auto_login_from_kdm_session) — no OIDC setup needed.
+#
+# Required env vars (injected by KDM provisioner):
 #   MYSQL_ROOT_PASSWORD     MariaDB root password (only needed on first run)
 #   FRAPPE_ADMIN_PASSWORD   ERPNext Administrator password (only needed on first run)
+#   KDM_API_INTERNAL_URL    Internal URL of the KDM Django API (default: http://django-api:8000)
 #
 # Optional:
 #   FRAPPE_SITE_NAME        site name in bench  (default: erpnext.localhost)
-#   OIDC_APP_SLUG           Authentik app slug  (default: erpnext)
 #   DB_HOST                 MariaDB host        (default: db)
 
 set -euo pipefail
@@ -70,14 +69,11 @@ if [ -n "${APP_PUBLIC_URL:-}" ]; then
 fi
 
 # ── Disable password login ─────────────────────────────────────────────────────
+# Auth is handled by the KDM trusted-session hook; password login is not needed.
 log "Disabling password-based login ..."
 ${BENCH} set-config disable_user_pass_login 1
 
-# ── Seed Authentik OIDC provider ───────────────────────────────────────────────
-log "Seeding Authentik OIDC provider ..."
-${BENCH} execute erpnext.kdm_auth.setup.seed_authentik_provider
-
-log "OIDC configuration complete.  Starting: $*"
+log "KDM auth configured.  Starting: $*"
 
 # ── Set default site so bench serve routes all requests to this site ───────────
 # bench use writes default_site into common_site_config.json. bench serve

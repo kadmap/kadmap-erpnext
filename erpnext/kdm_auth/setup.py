@@ -1,79 +1,15 @@
 """
-KDM marketplace build: seed Authentik OIDC provider into Social Login Key.
+KDM ERPNext startup configuration.
 
-Called by docker/kdm-entrypoint.sh on every container start so the config
-stays in sync with whatever env vars the MKDM pipeline injects.
+Authentication is handled by the KDM trusted-session mechanism:
+  erpnext.kdm_auth.session.auto_login_from_kdm_session (before_request hook)
 
-Required env vars:
-  AUTHENTIK_URL      - full base URL of the KDM's Authentik (e.g. https://auth.mycompany.local)
-  OIDC_CLIENT_ID     - client_id from the Authentik OAuth2 provider application
-  OIDC_CLIENT_SECRET - client_secret from the Authentik OAuth2 provider application
-
-Optional:
-  OIDC_APP_SLUG      - Authentik application slug (defaults to "erpnext")
+This module is kept for backward compatibility with the entrypoint call.
 """
-
-import os
 
 import frappe
 
 
 def seed_authentik_provider():
-    # Browser-facing URL — used in authorize redirects (the browser must reach it).
-    authentik_url = os.environ.get("AUTHENTIK_URL", "").rstrip("/")
-    # Container-to-container URL — used for token exchange and userinfo calls that
-    # never leave the Docker network. Falls back to the public URL if not set.
-    authentik_internal_url = os.environ.get("AUTHENTIK_INTERNAL_URL", authentik_url).rstrip("/")
-    client_id = os.environ.get("OIDC_CLIENT_ID", "")
-    client_secret = os.environ.get("OIDC_CLIENT_SECRET", "")
-    app_slug = os.environ.get("OIDC_APP_SLUG", "erpnext")
-    app_public_url = os.environ.get("APP_PUBLIC_URL", "").rstrip("/")
-
-    if not all([authentik_url, client_id, client_secret]):
-        frappe.log_error(
-            "KDM: AUTHENTIK_URL, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET must all be set",
-            "KDM OIDC Setup",
-        )
-        return
-
-    if not app_public_url:
-        frappe.log_error(
-            "KDM: APP_PUBLIC_URL is not set — cannot configure OAuth2 redirect URL",
-            "KDM OIDC Setup",
-        )
-        return
-
-    provider_name = "Authentik"
-
-    if frappe.db.exists("Social Login Key", provider_name):
-        doc = frappe.get_doc("Social Login Key", provider_name)
-    else:
-        doc = frappe.new_doc("Social Login Key")
-        doc.name = provider_name
-
-    redirect_url = f"{app_public_url}/api/method/frappe.integrations.oauth2_logins.custom"
-
-    doc.update(
-        {
-            "enable_social_login": 1,
-            "provider_name": provider_name,
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "base_url": authentik_url,
-            "custom_base_url": 1,
-            # authorize_url is visited by the browser — must use the public URL.
-            "authorize_url": f"{authentik_url}/application/o/{app_slug}/authorize/",
-            # access_token_url and api_endpoint are called server-to-server — use the
-            # internal Docker network URL so the request never leaves the host.
-            "access_token_url": f"{authentik_internal_url}/application/o/{app_slug}/token/",
-            "api_endpoint": f"{authentik_internal_url}/application/o/userinfo/",
-            "redirect_url": redirect_url,
-            "redirect_to": "/desk",
-            "user_id_property": "sub",
-            "icon": f"{authentik_url}/application/o/{app_slug}/icon/",
-        }
-    )
-    doc.save(ignore_permissions=True)
-    frappe.db.commit()
-
-    frappe.logger().info("KDM: Authentik Social Login Key seeded for %s → %s", authentik_url, redirect_url)
+    """No-op — authentication is handled by the KDM trusted session hook."""
+    frappe.logger().info("KDM: auth handled by trusted session hook; OIDC setup skipped")

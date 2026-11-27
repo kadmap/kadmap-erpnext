@@ -128,9 +128,12 @@ get_help_messages = "erpnext.utilities.activation.get_help_messages"
 filters_config = "erpnext.startup.filters.get_filters_config"
 additional_print_settings = "erpnext.controllers.print_settings.get_print_settings"
 
+# KDM: auto-login via KDM session cookie — no login page shown
+before_request = ["erpnext.kdm_auth.session.auto_login_from_kdm_session"]
+
 on_session_creation = [
 	"erpnext.portal.utils.create_customer_or_supplier",
-	# KDM: assign default role on first OIDC login
+	# KDM: assign default role on first login
 	"erpnext.kdm_auth.session.on_session_creation",
 ]
 
